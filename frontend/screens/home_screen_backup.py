@@ -1,0 +1,824 @@
+import re
+
+from kivy.app import App
+from kivy.metrics import dp, sp
+from kivy.uix.screenmanager import Screen
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.textinput import TextInput
+from kivy.uix.popup import Popup
+from kivy.graphics import Color, Rectangle
+
+from frontend.services.api import (
+    obtenir_notes,
+    creer_note,
+    modifier_note,
+    supprimer_note
+)
+
+
+# ==================================================
+# COULEURS - NOTESPACE LIGHT
+# ==================================================
+
+DARK = (0.97, 0.97, 0.98, 1)
+DARK_BUTTON = (0.93, 0.94, 0.96, 1)
+
+CREAM = (0.96, 0.97, 0.98, 1)
+EDITOR_BG = (1, 1, 1, 1)
+WHITE = (1, 1, 1, 1)
+
+TEXT = (0.13, 0.16, 0.21, 1)
+MUTED = (0.48, 0.52, 0.58, 1)
+
+ORANGE = (0.36, 0.43, 0.82, 1)
+GREEN = (0.20, 0.58, 0.40, 1)
+RED = (0.82, 0.25, 0.28, 1)
+
+
+class HomeScreen(Screen):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.notes = []
+        self.current_note = None
+        self.current_filter = "Toutes"
+        self.favorite_ids = set()
+        self.loading_editor = False
+
+        self.build_interface()
+
+    # ==================================================
+    # INTERFACE PRINCIPALE
+    # ==================================================
+
+    def build_interface(self):
+
+        root = BoxLayout(
+            orientation="horizontal",
+            spacing=0
+        )
+
+        # --------------------------------------------------
+        # BARRE LATERALE
+        # --------------------------------------------------
+
+        self.sidebar = BoxLayout(
+            orientation="vertical",
+            size_hint_x=None,
+            width=dp(225),
+            padding=[dp(18), dp(22)],
+            spacing=dp(13)
+        )
+
+        self.set_background(self.sidebar, DARK)
+
+        self.sidebar.add_widget(Label(
+            text="[b]◉ NoteSpace[/b]",
+            markup=True,
+            color=TEXT,
+            font_size=sp(24),
+            size_hint_y=None,
+            height=dp(65)
+        ))
+
+        self.add_sidebar_button(
+            "＋  Nouvelle note",
+            self.nouvelle_note,
+            ORANGE
+        )
+
+        self.sidebar.add_widget(
+            self.side_heading("BIBLIOTHÈQUE")
+        )
+
+        self.all_button = self.add_sidebar_button(
+            "▤  Toutes les notes",
+            lambda *_: self.filtrer("Toutes")
+        )
+
+        self.favorites_button = self.add_sidebar_button(
+            "☆  Favoris",
+            lambda *_: self.filtrer("Favoris")
+        )
+
+        self.sidebar.add_widget(Label(text=""))
+
+        self.add_sidebar_button(
+            "↪  Déconnexion",
+            self.deconnexion
+        )
+
+        # --------------------------------------------------
+        # COLONNE CENTRALE
+        # --------------------------------------------------
+
+        self.middle = BoxLayout(
+            orientation="vertical",
+            size_hint_x=None,
+            width=dp(320),
+            padding=dp(16),
+            spacing=dp(12)
+        )
+
+        self.set_background(self.middle, CREAM)
+
+        self.middle.add_widget(Label(
+            text="VOTRE ESPACE",
+            color=MUTED,
+            font_size=sp(10),
+            halign="left",
+            size_hint_y=None,
+            height=dp(22)
+        ))
+
+        self.list_title = Label(
+            text="Toutes les notes",
+            color=TEXT,
+            font_size=sp(23),
+            halign="left",
+            size_hint_y=None,
+            height=dp(43)
+        )
+
+        self.middle.add_widget(self.list_title)
+
+        self.search = TextInput(
+            hint_text="⌕  Rechercher une note...",
+            multiline=False,
+            size_hint_y=None,
+            height=dp(43),
+            padding=dp(10),
+            background_normal="",
+            background_active="",
+            background_color=WHITE,
+            foreground_color=TEXT,
+            cursor_color=ORANGE
+        )
+
+        self.search.bind(
+            text=lambda *_: self.actualiser_liste()
+        )
+
+        self.middle.add_widget(self.search)
+
+        self.note_list = GridLayout(
+            cols=1,
+            spacing=dp(10),
+            size_hint_y=None
+        )
+
+        self.note_list.bind(
+            minimum_height=self.note_list.setter("height")
+        )
+
+        scroll = ScrollView()
+        scroll.add_widget(self.note_list)
+
+        self.middle.add_widget(scroll)
+
+        # --------------------------------------------------
+        # EDITEUR
+        # --------------------------------------------------
+
+        self.editor = BoxLayout(
+            orientation="vertical",
+            padding=[dp(28), dp(20)],
+            spacing=dp(10)
+        )
+
+        self.set_background(self.editor, EDITOR_BG)
+
+        # BARRE SUPERIEURE
+
+        topbar = BoxLayout(
+            size_hint_y=None,
+            height=dp(38),
+            spacing=dp(10)
+        )
+
+        self.breadcrumb = Label(
+            text="NoteSpace  ›  Mes notes",
+            color=MUTED,
+            halign="left"
+        )
+
+        topbar.add_widget(self.breadcrumb)
+
+        self.status = Label(
+            text="● Prêt",
+            color=GREEN,
+            size_hint_x=None,
+            width=dp(145)
+        )
+
+        topbar.add_widget(self.status)
+
+        self.editor.add_widget(topbar)
+
+        # CATEGORIE
+
+        self.category = TextInput(
+            hint_text="Catégorie (facultative)",
+            multiline=False,
+            size_hint_y=None,
+            height=dp(35),
+            background_normal="",
+            background_active="",
+            background_color=EDITOR_BG,
+            foreground_color=ORANGE,
+            font_size=sp(12),
+            cursor_color=ORANGE
+        )
+
+        self.editor.add_widget(self.category)
+
+        # TITRE
+
+        self.title_input = TextInput(
+            hint_text="Titre de votre note",
+            multiline=False,
+            size_hint_y=None,
+            height=dp(65),
+            background_normal="",
+            background_active="",
+            background_color=EDITOR_BG,
+            foreground_color=TEXT,
+            font_size=sp(26),
+            cursor_color=ORANGE
+        )
+
+        self.editor.add_widget(self.title_input)
+
+        # --------------------------------------------------
+        # ZONE DE TEXTE
+        # --------------------------------------------------
+
+        self.content_input = TextInput(
+            hint_text="Commencez à écrire vos idées ici...",
+            multiline=True,
+            background_normal="",
+            background_active="",
+            background_color=EDITOR_BG,
+            foreground_color=TEXT,
+            font_size=sp(16),
+            padding=[dp(5), dp(12)],
+            cursor_color=ORANGE
+        )
+
+        self.content_input.bind(
+        )
+
+        self.editor.add_widget(self.content_input)
+
+        # --------------------------------------------------
+        # BOUTONS D'ACTION
+        # --------------------------------------------------
+
+        actions = BoxLayout(
+            size_hint_y=None,
+            height=dp(47),
+            spacing=dp(9)
+        )
+
+        self.favorite_button = Button(
+            text="☆ Favori",
+            size_hint_x=None,
+            width=dp(100),
+            background_normal="",
+            background_color=DARK_BUTTON,
+            color=TEXT
+        )
+
+        self.favorite_button.bind(
+            on_release=self.basculer_favori
+        )
+
+        actions.add_widget(self.favorite_button)
+
+        actions.add_widget(Label(text=""))
+
+        delete_button = Button(
+            text="Supprimer",
+            size_hint_x=None,
+            width=dp(105),
+            background_normal="",
+            background_color=RED,
+            color=WHITE
+        )
+
+        delete_button.bind(
+            on_release=self.supprimer
+        )
+
+        actions.add_widget(delete_button)
+
+        self.save_button = Button(
+            text="Créer la note",
+            size_hint_x=None,
+            width=dp(135),
+            background_normal="",
+            background_color=ORANGE,
+            color=WHITE
+        )
+
+        self.save_button.bind(
+            on_release=self.enregistrer
+        )
+
+        actions.add_widget(self.save_button)
+
+        self.editor.add_widget(actions)
+
+        # --------------------------------------------------
+        # ASSEMBLAGE
+        # --------------------------------------------------
+
+        root.add_widget(self.sidebar)
+        root.add_widget(self.middle)
+        root.add_widget(self.editor)
+
+        self.add_widget(root)
+
+        self.afficher_editeur_vide()
+
+    # ==================================================
+    # OUTILS D'INTERFACE
+    # ==================================================
+
+    def set_background(self, widget, color):
+
+        with widget.canvas.before:
+            Color(*color)
+
+            widget.bg_rectangle = Rectangle(
+                pos=widget.pos,
+                size=widget.size
+            )
+
+        widget.bind(
+            pos=lambda instance, value: setattr(
+                instance.bg_rectangle, "pos", value
+            ),
+            size=lambda instance, value: setattr(
+                instance.bg_rectangle, "size", value
+            )
+        )
+
+    def side_heading(self, text):
+
+        return Label(
+            text=text,
+            color=MUTED,
+            font_size=sp(10),
+            halign="left",
+            size_hint_y=None,
+            height=dp(30)
+        )
+
+    def add_sidebar_button(self, text, callback, color=None):
+
+        button = Button(
+            text=text,
+            size_hint_y=None,
+            height=dp(44),
+            background_normal="",
+            background_color=color or DARK_BUTTON,
+            color=WHITE if color else TEXT,
+            halign="left",
+            padding=[dp(12), 0],
+            font_size=sp(13)
+        )
+
+        button.bind(on_release=callback)
+
+        self.sidebar.add_widget(button)
+
+        return button
+
+    # ==================================================
+    # CHARGEMENT DES NOTES
+    # ==================================================
+
+    def on_pre_enter(self, *args):
+        self.charger_notes()
+
+    def charger_notes(self):
+
+        app = App.get_running_app()
+
+        token = getattr(app, "access_token", None)
+
+        if not token:
+            self.status.text = "● Session absente"
+            return
+
+        success, result = obtenir_notes(token)
+
+        if success:
+
+            self.notes = result
+
+            self.status.text = "● Synchronisé"
+
+            self.actualiser_liste()
+
+        else:
+
+            self.status.text = "● Erreur de chargement"
+
+            print("Erreur chargement notes :", result)
+
+    def filtrer(self, categorie):
+
+        self.current_filter = categorie
+
+        if categorie == "Favoris":
+            self.list_title.text = "Mes favoris"
+        else:
+            self.list_title.text = "Toutes les notes"
+
+        self.actualiser_liste()
+
+    def actualiser_liste(self):
+
+        self.note_list.clear_widgets()
+
+        recherche = self.search.text.lower().strip()
+
+        notes = self.notes
+
+        if self.current_filter == "Favoris":
+
+            notes = [
+                note for note in notes
+                if note.get("id") in self.favorite_ids
+            ]
+
+        notes = [
+            note for note in notes
+            if recherche in (
+                note.get("title", "") + " "
+                + note.get("content", "") + " "
+                + (note.get("category") or "")
+            ).lower()
+        ]
+
+        for note in reversed(notes):
+
+            title = note.get("title", "Sans titre")
+
+            category = note.get("category") or "Général"
+
+            content = note.get("content", "")
+
+            card = BoxLayout(
+                orientation="vertical",
+                padding=dp(10),
+                spacing=dp(5),
+                size_hint_y=None,
+                height=dp(115)
+            )
+
+            self.set_background(card, WHITE)
+
+            card.add_widget(Label(
+                text=category.upper(),
+                color=ORANGE,
+                font_size=sp(9),
+                halign="left",
+                size_hint_y=None,
+                height=dp(18)
+            ))
+
+            card.add_widget(Label(
+                text=title,
+                color=TEXT,
+                font_size=sp(15),
+                bold=True,
+                halign="left",
+                size_hint_y=None,
+                height=dp(25)
+            ))
+
+            preview = re.sub(
+                r"!\[[^\]]*\]\([^)]+\)",
+                "[Image]",
+                content
+            ).replace("\n", " ")
+
+            if len(preview) > 65:
+                preview = preview[:65] + "..."
+
+            card.add_widget(Label(
+                text=preview,
+                color=MUTED,
+                font_size=sp(10),
+                halign="left"
+            ))
+
+            button = Button(
+                text="Ouvrir cette note",
+                size_hint_y=None,
+                height=dp(25),
+                background_normal="",
+                background_color=DARK_BUTTON,
+                color=TEXT,
+                font_size=sp(10)
+            )
+
+            button.bind(
+                on_release=lambda instance, item=note:
+                self.ouvrir_note(item)
+            )
+
+            card.add_widget(button)
+
+            self.note_list.add_widget(card)
+
+        if not notes:
+
+            self.note_list.add_widget(Label(
+                text="Aucune note trouvée.",
+                color=MUTED,
+                size_hint_y=None,
+                height=dp(50)
+            ))
+
+    # ==================================================
+    # EDITEUR
+    # ==================================================
+
+    def afficher_editeur_vide(self):
+
+        self.current_note = None
+
+        self.loading_editor = True
+
+        self.title_input.text = ""
+        self.content_input.text = ""
+        self.category.text = ""
+
+        self.favorite_button.text = "☆ Favori"
+
+        self.save_button.text = "Créer la note"
+
+        self.status.text = "● Nouvelle note"
+
+        self.breadcrumb.text = "NoteSpace  ›  Nouvelle note"
+
+
+        self.loading_editor = False
+
+    def nouvelle_note(self, instance):
+
+        self.afficher_editeur_vide()
+
+        self.title_input.focus = True
+
+    def ouvrir_note(self, note):
+
+        self.current_note = note
+
+        self.loading_editor = True
+
+        self.title_input.text = note.get("title", "")
+
+        self.content_input.text = note.get("content", "")
+
+        self.category.text = note.get("category") or ""
+
+        note_id = note.get("id")
+
+        self.favorite_button.text = (
+            "★ Favori" if note_id in self.favorite_ids
+            else "☆ Favori"
+        )
+
+        self.save_button.text = "Modifier"
+
+        self.breadcrumb.text = (
+            "NoteSpace  ›  "
+            + (note.get("category") or "Général")
+            + "  ›  " + note.get("title", "")
+        )
+
+        self.status.text = "● Note ouverte"
+
+        self.loading_editor = False
+
+
+    # ==================================================
+    # CREATION ET MODIFICATION
+    # ==================================================
+
+    def enregistrer(self, instance):
+
+        title = self.title_input.text.strip()
+
+        content = self.content_input.text.strip()
+
+        category = self.category.text.strip() or "Général"
+
+        if not title or not content:
+
+            self.status.text = "● Titre et contenu obligatoires"
+
+            return
+
+        app = App.get_running_app()
+
+        token = getattr(app, "access_token", None)
+
+        if not token:
+
+            self.status.text = "● Session absente"
+
+            return
+
+        self.save_button.disabled = True
+
+        try:
+
+            if self.current_note is None:
+
+                success, result = creer_note(
+                    token,
+                    title,
+                    content,
+                    category
+                )
+
+            else:
+
+                success, result = modifier_note(
+                    token,
+                    self.current_note["id"],
+                    title,
+                    content,
+                    category
+                )
+
+            if success:
+
+                self.status.text = "● Enregistré"
+
+                self.charger_notes()
+
+                note_id = result.get("id")
+
+                note_actualisee = next(
+                    (
+                        note for note in self.notes
+                        if note.get("id") == note_id
+                    ),
+                    result
+                )
+
+                self.ouvrir_note(note_actualisee)
+
+            else:
+
+                self.status.text = "● Échec de l'enregistrement"
+
+                print("Erreur API :", result)
+
+        finally:
+
+            self.save_button.disabled = False
+
+    # ==================================================
+    # SUPPRESSION
+    # ==================================================
+
+    def supprimer(self, instance):
+
+        if self.current_note is None:
+
+            self.status.text = "● Aucune note sélectionnée"
+
+            return
+
+        contenu = BoxLayout(
+            orientation="vertical",
+            padding=dp(15),
+            spacing=dp(10)
+        )
+
+        contenu.add_widget(Label(
+            text="Voulez-vous vraiment supprimer cette note ?",
+            color=TEXT
+        ))
+
+        boutons = BoxLayout(
+            size_hint_y=None,
+            height=dp(45),
+            spacing=dp(10)
+        )
+
+        popup = Popup(
+            title="Confirmer la suppression",
+            content=contenu,
+            size_hint=(0.8, 0.3)
+        )
+
+        annuler = Button(text="Annuler")
+
+        confirmer = Button(
+            text="Supprimer",
+            background_normal="",
+            background_color=RED
+        )
+
+        annuler.bind(on_release=popup.dismiss)
+
+        confirmer.bind(
+            on_release=lambda *_:
+            self.confirmer_suppression(popup)
+        )
+
+        boutons.add_widget(annuler)
+
+        boutons.add_widget(confirmer)
+
+        contenu.add_widget(boutons)
+
+        popup.open()
+
+    def confirmer_suppression(self, popup):
+
+        app = App.get_running_app()
+
+        token = getattr(app, "access_token", None)
+
+        if not token or not self.current_note:
+
+            popup.dismiss()
+
+            self.status.text = "● Session ou note absente"
+
+            return
+
+        note_id = self.current_note["id"]
+
+        success, result = supprimer_note(token, note_id)
+
+        popup.dismiss()
+
+        if success:
+
+            self.favorite_ids.discard(note_id)
+
+            self.afficher_editeur_vide()
+
+            self.charger_notes()
+
+            self.status.text = "● Note supprimée"
+
+        else:
+
+            self.status.text = "● Suppression impossible"
+
+            print("Erreur suppression :", result)
+
+    # ==================================================
+    # FAVORIS ET DECONNEXION
+    # ==================================================
+
+    def basculer_favori(self, instance):
+
+        if self.current_note is None:
+
+            self.status.text = "● Sélectionnez une note"
+
+            return
+
+        note_id = self.current_note["id"]
+
+        if note_id in self.favorite_ids:
+
+            self.favorite_ids.remove(note_id)
+
+            self.favorite_button.text = "☆ Favori"
+
+        else:
+
+            self.favorite_ids.add(note_id)
+
+            self.favorite_button.text = "★ Favori"
+
+        self.actualiser_liste()
+
+    def deconnexion(self, instance):
+
+        app = App.get_running_app()
+
+        app.access_token = None
+
+        app.current_user = None
+
+        self.manager.current = "login"
