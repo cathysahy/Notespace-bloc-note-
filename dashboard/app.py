@@ -257,7 +257,7 @@ else:
 
     # HEADER
     st.markdown(
-        '<div class="main-title">Bienvenue sur NoteSpace 👋</div>',
+        '<div class="main-title">Bienvenue sur NoteSpace </div>',
         unsafe_allow_html=True
     )
     st.markdown(
@@ -318,7 +318,7 @@ else:
                         )
                         st.write(note.get("content", ""))
                         st.caption(
-                            f"📁 {note.get('category') or 'Personnel'}"
+                            f" {note.get('category') or 'Personnel'}"
                         )
             else:
                 st.info("Aucune note pour le moment.")
@@ -438,7 +438,7 @@ else:
 
         elif page == "Nouvelle note":
 
-            st.subheader("✍️ Créer une nouvelle note")
+            st.subheader(" Créer une nouvelle note")
 
             with st.form("create_note_form"):
 
@@ -517,7 +517,7 @@ else:
 
         st.divider()
 
-        if st.button("🔄 Actualiser les données"):
+        if st.button(" Actualiser les données"):
             st.rerun()
 
         st.caption(
