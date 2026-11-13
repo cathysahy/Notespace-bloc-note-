@@ -1,3 +1,7 @@
+
+import os
+import requests
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -7,10 +11,39 @@ from backend.models.user import User
 from backend.schemas.note import NoteCreate, NoteUpdate, NoteResponse
 from backend.dependencies import get_current_user
 
-router = APIRouter(
-    prefix="/notes",
-    tags=["Notes"]
+
+router = APIRouter(prefix="/notes", tags=["Notes"])
+
+REALTIME_URL = "http://127.0.0.1:8765/publish"
+
+REALTIME_SECRET = os.getenv(
+    "NOTESPACE_REALTIME_SECRET",
+    "notespace-local-dev-secret"
 )
+
+
+def notifier_evenement(action, note, user):
+    """Envoie une notification à Tornado après une opération sur une note."""
+
+    evenement = {
+        "type": "note",
+        "action": action,
+        "note_id": note.id,
+        "title": note.title,
+        "user_id": user.id
+    }
+
+    try:
+        requests.post(
+            REALTIME_URL,
+            json=evenement,
+            headers={
+                "X-Notespace-Secret": REALTIME_SECRET
+            },
+            timeout=2
+        )
+    except requests.RequestException as error:
+        print(f"Notification Tornado indisponible : {error}")
 
 
 @router.post(
@@ -33,6 +66,8 @@ def creer_note(
     db.add(note)
     db.commit()
     db.refresh(note)
+
+    notifier_evenement("created", note, current_user)
 
     return note
 
@@ -62,7 +97,10 @@ def obtenir_note(
     ).first()
 
     if note is None:
-        raise HTTPException(status_code=404, detail="Note introuvable")
+        raise HTTPException(
+            status_code=404,
+            detail="Note introuvable"
+        )
 
     return note
 
@@ -80,7 +118,10 @@ def modifier_note(
     ).first()
 
     if note is None:
-        raise HTTPException(status_code=404, detail="Note introuvable")
+        raise HTTPException(
+            status_code=404,
+            detail="Note introuvable"
+        )
 
     modifications = note_data.model_dump(exclude_unset=True)
 
@@ -89,6 +130,8 @@ def modifier_note(
 
     db.commit()
     db.refresh(note)
+
+    notifier_evenement("updated", note, current_user)
 
     return note
 
@@ -105,9 +148,28 @@ def supprimer_note(
     ).first()
 
     if note is None:
-        raise HTTPException(status_code=404, detail="Note introuvable")
+        raise HTTPException(
+            status_code=404,
+            detail="Note introuvable"
+        )
+
+    note_supprimee = {
+        "id": note.id,
+        "title": note.title
+    }
 
     db.delete(note)
     db.commit()
 
-    return {"message": "Note supprimée avec succès"}
+    class NoteSupprimee:
+        pass
+
+    evenement = NoteSupprimee()
+    evenement.id = note_supprimee["id"]
+    evenement.title = note_supprimee["title"]
+
+    notifier_evenement("deleted", evenement, current_user)
+
+    return {
+        "message": "Note supprimée avec succès"
+    }
