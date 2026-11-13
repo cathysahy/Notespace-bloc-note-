@@ -1,6 +1,6 @@
 
 
-# 📝 NoteSpace
+#  NoteSpace
 
 **NoteSpace** est une application de prise de notes développée avec Python. Elle permet de créer, modifier, supprimer, rechercher et organiser des notes grâce à une interface moderne et intuitive.
 
