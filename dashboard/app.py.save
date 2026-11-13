@@ -1,0 +1,220 @@
+import streamlit as st
+import requests
+from datetime import datetime
+
+API_URL = "http://127.0.0.1:8000"
+
+.set_page_config(
+    page_title="NoteSpace",
+    page_icon="📝",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# DESIGN
+st.markdown("""
+<style>
+.stApp {
+    background-color: #f5f6fa;
+}
+.block-container {
+    padding-top: 2rem;
+}
+[data-testid="stSidebar"] {
+    background-color: #ffffff;
+}
+.main-title {
+    font-size: 34px;
+    font-weight: 800;
+    color: #252b42;
+}
+.subtitle {
+    color: #85899b;
+    font-size: 15px;
+}
+.stat-card {
+    background: white;
+    padding: 22px;
+    border-radius: 14px;
+    border: 1px solid #e8eaf0;
+}
+.stat-label {
+    color: #85899b;
+    font-size: 14px;
+}
+.stat-value {
+    color: #252b42;
+    font-size: 30px;
+    font-weight: bold;
+}
+.note-card {
+    background: white;
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid #e8eaf0;
+    margin-bottom: 12px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# SIDEBAR
+with st.sidebar:
+    st.markdown("## 📝 NoteSpace")
+    st.caption("Your ideas, your space.")
+    st.divider()
+
+    page = st.radio(
+        "NAVIGATION",
+        ["Tableau de bord", "Toutes les notes", "À propos"]
+    )
+
+    st.divider()
+    st.caption("NoteSpace Dashboard")
+    st.caption("Version 1.0")
+
+# RECUPERATION DES NOTES
+def load_notes():
+    try:
+        response = requests.get(
+            f"{API_URL}/notes",
+            timeout=5
+        )
+        response.raise_for_status()
+        return response.json(), None
+    except requests.RequestException as error:
+        return [], str(error)
+
+notes, error = load_notes()
+
+# EN-TETE
+st.markdown(
+    '<div class="main-title">Bienvenue sur NoteSpace 👋</div>',
+    unsafe_allow_html=True
+)
+st.markdown(
+    '<div class="subtitle">Gérez et visualisez vos notes facilement.</div>',
+    unsafe_allow_html=True
+)
+
+st.write("")
+
+if error:
+    st.error("Impossible de contacter FastAPI.")
+    st.code(error)
+    st.info("Vérifiez que le backend fonctionne sur le port 8000.")
+
+else:
+    total = len(notes)
+
+    categories = set(
+        note.get("category") or "Personnel"
+        for note in notes
+    )
+
+    if page == "Tableau de bord":
+
+        st.subheader("Vue générale")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown(f"""
+            <div class="stat-card">
+                <div class="stat-label">Total des notes</div>
+                <div class="stat-value">{total}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            st.markdown(f"""
+            <div class="stat-card">
+                <div class="stat-label">Catégories</div>
+                <div class="stat-value">{len(categories)}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col3:
+            st.markdown("""
+            <div class="stat-card">
+                <div class="stat-label">Application</div>
+                <div class="stat-value">Active</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.write("")
+        st.divider()
+
+        st.subheader("Notes récentes")
+
+        if notes:
+            for note in reversed(notes[-5:]):
+                with st.container():
+                    st.markdown(f"""
+                    <div class="note-card">
+                        <h4>{note.get('title', 'Sans titre')}</h4>
+                        <p>{note.get('content', '')[:180]}</p>
+                        <small>📁 {note.get('category', 'Personnel')}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.info("Aucune note disponible pour le moment.")
+
+    elif page == "Toutes les notes":
+
+        st.subheader("📚 Toutes les notes")
+
+        search = st.text_input(
+            "🔍 Rechercher une note",
+            placeholder="Saisir un titre ou un contenu..."
+        )
+
+        filtered_notes = [
+            note for note in notes
+            if search.lower() in (
+                note.get("title", "") +
+                " " +
+                note.get("content", "")
+            ).lower()
+        ]
+
+        st.caption(f"{len(filtered_notes)} note(s) trouvée(s)")
+
+        for note in filtered_notes:
+            with st.expander(note.get("title", "Sans titre")):
+                st.write(note.get("content", ""))
+                st.caption(
+                    f"Catégorie : {note.get('category', 'Personnel')}"
+                )
+
+        if not filtered_notes:
+            st.info("Aucune note trouvée.")
+
+    elif page == "À propos":
+
+        st.subheader("À propos de NoteSpace")
+
+        st.write("""
+        NoteSpace est une application de prise de notes
+        développée avec Python.
+
+        **Technologies :**
+        - Python et Kivy
+        - FastAPI
+        - MySQL
+        - Streamlit
+        - Tornado
+
+        **Objectif :**
+
+        Faciliter la création, la gestion et l'organisation
+        des notes dans un environnement simple et moderne.
+        """)
+
+    st.divider()
+
+    if st.button("🔄 Actualiser les données"):
+        st.rerun()
+
+    st.caption(
+        f"NoteSpace © {datetime.now().year} | Dashboard"
+    )
